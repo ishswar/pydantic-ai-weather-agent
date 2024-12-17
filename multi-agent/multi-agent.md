@@ -1,8 +1,6 @@
 
 # Multi-Agent System in Pydantic AI
 
-![Agents_intro](../pydantic_ai/static/agents_gui_intro.png)
-
 ## Overview
 
 This system utilizes Pydantic AI to simulate multiple agents working together to handle different types of customer queries. The agents are specifically designed for handling customer support, loan inquiries, and triaging queries between the support and loan departments. Below is an explanation of how the agents interact with each other and the flow of data between them.

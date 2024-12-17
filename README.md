@@ -27,6 +27,15 @@ while the input checker agent is responsible for validating the user input. Only
 to weather information, the weather agent is activated. Otherwise, the input checker agent will respond with a helpfull 
 message stating that the request is not related to weather information.
 
+## GUI Interface
+
+Below image shows the GUI interface of the chatbot . How and what part of Agents contribute to Weather information
+and how data is retried from backend 
+
+![Agents_intro](pydantic_ai/static/agents_gui_intro.png)
+
+
+
 ## Demo 
 
 - Demo shows user asking non whether related question
