@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  pyd_app:
+    build: pydantic_ai
+    container_name: streamlit_pyd_app
+    expose:
+      - "8581"
+    networks:
+      - app_network_pyd
+    volumes:
+      - streamlit_data_pyd:/app/data
+
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data_pyd:/data
+      - caddy_config_pyd:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - app
+    networks:
+      - app_network_pyd
+
+networks:
+  app_network_pyd:
+    driver: bridge
+
+volumes:
+  caddy_data_pyd:
+  caddy_config_pyd:
+  streamlit_data_pyd:

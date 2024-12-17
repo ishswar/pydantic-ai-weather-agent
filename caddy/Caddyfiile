@@ -1,0 +1,3 @@
+agent.localhost {
+   reverse_proxy pyd_app:8581
+}
