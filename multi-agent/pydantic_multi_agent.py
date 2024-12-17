@@ -140,7 +140,8 @@ support_agent = Agent(
         'You are a support agent in our bank, give the '
         'customer support and judge the risk level of their query. '
         "Reply using the customer's name."
-        'Additionally, always capture the customer’s name in our marking system using the tool `capture_customer_name`, regardless of the query type. '
+        'Additionally, always capture the customer’s name in our marking system using the tool `capture_customer_name`,'
+        ' regardless of the query type. '
         'At the end of your response, make sure to capture the customer’s name to maintain proper records. '
     ),
     result_retries=2,
@@ -153,7 +154,8 @@ async def add_customer_name(ctx: RunContext[SupportDependencies]) -> str:
 
 @support_agent.tool()
 async def block_card(ctx: RunContext[SupportDependencies] , customer_name: str ) -> str:
-    return f"I'm sorry to hear that, {customer_name}. We are temporarily blocking your card to prevent unauthorized transactions."
+    return (f"I'm sorry to hear that, {customer_name}. We are temporarily blocking your card to prevent unauthorized "
+            f"transactions.")
 
 
 @support_agent.tool
@@ -179,8 +181,10 @@ loan_agent = Agent(
         '- Loan approval status (e.g., Approved, Denied, Pending) '
         '- Loan balance '
         'Please ensure that your response is clear and helpful for the customer. '
-        'Always conclude by providing the customer’s name and capturing their information in the marking system using the tool `capture_customer_name`. '
-        'Never generate data based on your internal knowledge; always rely on the provided tools to fetch the most accurate and up-to-date information.'
+        'Always conclude by providing the customer’s name and capturing their information in the marking system using '
+        'the tool `capture_customer_name`. '
+        'Never generate data based on your internal knowledge; always rely on the provided tools to fetch the most '
+        'accurate and up-to-date information.'
     ),
     result_retries=2,
 )
@@ -233,12 +237,16 @@ triage_agent = Agent(
     deps_type=TriageDependencies,
     system_prompt=(
         'You are a triage agent in our bank, responsible for directing customer queries to the appropriate department. '
-        'For each query, determine whether it is related to support (e.g., balance, card, account-related queries) or loan services (e.g., loan status, application, and loan-related inquiries). '
+        'For each query, determine whether it is related to support (e.g., balance, card, account-related queries) or '
+        'loan services (e.g., loan status, application, and loan-related inquiries). '
         'If the query is related to support, direct the customer to the support team with an appropriate response. '
         'If the query is related to loans, direct the customer to the loan department with a relevant response. '
-        'If the query is unclear or does not fit into either category, politely inform the customer and suggest they ask about loans or support. '
-        'Always ensure that the response is clear, concise, and provides direction to the right department for further assistance.'
-        'Never generate data based on your internal knowledge; always rely on the provided tools to fetch the most accurate and up-to-date information.'
+        'If the query is unclear or does not fit into either category, politely inform the customer and suggest they '
+        'ask about loans or support. '
+        'Always ensure that the response is clear, concise, and provides direction to the right department for further'
+        ' assistance.'
+        'Never generate data based on your internal knowledge; always rely on the provided tools to fetch the most '
+        'accurate and up-to-date information.'
     ),
     result_type=TriageResult,
     result_retries=2,
@@ -249,7 +257,8 @@ triage_agent = Agent(
 @triage_agent.tool
 async def call_support_agent(ctx: RunContext[TriageDependencies], prompt: str) -> RunResult[Any]:
     # print(f"Calling support agent with prompt: {prompt}")
-    support_deps = SupportDependencies(customer_id=ctx.deps.customer_id, db=DatabaseConn(), marketing_agent=marketing_agent)
+    support_deps = SupportDependencies(customer_id=ctx.deps.customer_id, db=DatabaseConn(),
+                                       marketing_agent=marketing_agent)
 
     # Pass message history if you need your agent to have context of previous messages
     # return await ctx.deps.support_agent.run(prompt, deps=support_deps, message_history=ctx.messages)
@@ -327,7 +336,8 @@ def print_prompt(prompt: str):
 def main():
     print(f"Pydantic version {pydantic.__version__}")
     print(f"Pydantic version {pydantic_ai.__version__}")
-    deps = TriageDependencies(support_agent=support_agent, loan_agent=loan_agent, customer_id=123)
+    deps = TriageDependencies(support_agent=support_agent, loan_agent=loan_agent,
+                              customer_id=123)
     prompt = 'What is my balance?'
     print_prompt(prompt)
     result = triage_agent.run_sync(prompt, deps=deps)
