@@ -17,14 +17,15 @@ import asyncio
 import os
 import uuid
 from pydantic import BaseModel
-from pydantic_ai.messages import ModelTextResponse, UserPrompt
+from pydantic_ai.messages import ModelResponse, UserPromptPart
 from pydantic_ai.result import ResultData
 
+# from weather_agent import AgentResult
 from utils.all_utils import calculate_cost, update_cost_in_csv, calculate_total_cost_from_csv, generate_daily_report, \
     sample_prompts
 from weather_agent import WeatherData, input_checker_agent
 # from web_search_agent import web_search_agent, Deps
-from weather_agent import weather_agent, Deps
+from weather_agent import weather_agent, Deps , AgentResult
 import logging
 import plotly.graph_objects as go
 
@@ -56,15 +57,15 @@ async def prompt_ai(messages) -> tuple[ResultData, uuid.UUID]:
             conversation_id=conversation_id
         )
 
-        for message in messages:
-            if isinstance(message, ModelTextResponse):
-                # Call the __str__ method on WeatherData inside ModelTextResponse
-                message.content = str(message.content)  # This calls __str__ on WeatherData
+        # for message in messages:
+        #     if isinstance(message, ModelResponse):
+        #         # Call the __str__ method on WeatherData inside ModelTextResponse
+        #         message.content = str(message.content)  # This calls __str__ on WeatherData
 
         # All the magic happens here
         # Call the agent with the last message in the conversation ; this is what user has asked
         result = await input_checker_agent.run(
-            messages[-1].content, deps=deps
+            messages[-1]["content"], deps=deps
         )
 
 
@@ -280,20 +281,24 @@ async def main():
 
             # Display chat messages from history on app rerun
         for message in st.session_state.messages:
-            role = message.role
+            role = message["role"]
             if role in ["user", "model-text-response"]:
                 with st.chat_message("human" if role == "user" else "ai" , avatar="🧑‍💻" if role == "user" else "🤖"):
-                    if isinstance(message.content, WeatherData):
-                        print_weather_data(message.content)
+                    if isinstance(message["content"], BaseModel):
+                        if message["content"].weather_data:
+                            print_weather_data(message["content"].weather_data)
+                        elif message["content"].non_weather_related_message:
+                            st.write(message["content"].non_weather_related_message)
                     else:
-                        st.markdown(message.content)
+                        st.markdown(message["content"])
 
         # React to user input
         if prompt := st.chat_input("What is weather like in New York?"):
             # Display user message in chat message container
             st.chat_message("user" , avatar="🧑‍💻").markdown(prompt)
             # Add user message to chat history
-            st.session_state.messages.append(UserPrompt(content=prompt))
+            # st.session_state.messages.append(UserPromptPart(content=prompt))
+            st.session_state.messages.append({"role": "user", "content": prompt})
 
             # Display assistant response in chat message container
             response_content = ""
@@ -307,12 +312,15 @@ async def main():
                         weather = agent_result.data # Get the weather data from the agent result
                         end_time = time.time()
                         logger.info(f"Time taken to fetch weather data: {(end_time - start_time)}")
+                        # st.session_state.messages = agent_result.all_messages()
+                        st.session_state.messages.append({"role": "model-text-response", "content": weather})
                 except Exception as e:
                     st.error(f"An error occurred: {str(e)}")
                     response_content = f"An error occurred while calling agent : {str(e)}"
                     print(f"An error occurred while calling agent : {str(e)}")
                     logger.error(f"An error occurred while calling agent : {str(e)}", exc_info=True)
-                    st.session_state.messages.append(ModelTextResponse(content=response_content))
+                    # st.session_state.messages.append(ModelResponse(content=response_content))
+                    st.session_state.messages.append({"role": "model-text-response", "content": response_content})
                     return
 
                 # Start cost calculation work
@@ -327,53 +335,57 @@ async def main():
                 )
                 # End cost calculation work
 
-                if isinstance(weather.weather_data, WeatherData):
-                    if weather.weather_data.unknown_city:
-                        response_content = f"Sorry, I couldn't find any information [{weather.reason}]"
-                        st.error(response_content)
-                    else:
-                        if isinstance(weather.weather_data, WeatherData):
-                            if len(weather.weather_data.forecasts) == 0:
-                                response_content = f"Sorry, I couldn't find any information - Check the city name and try again."
-                                st.error(response_content)
-                            else:
-                                response_content = weather.weather_data
+                if weather.weather_data:
+                    if isinstance(weather.weather_data, WeatherData):
+                        if weather.weather_data.unknown_city:
+                            response_content = f"Sorry, I couldn't find any information [{weather.reason}]"
+                            st.error(response_content)
+                        else:
+                            if isinstance(weather.weather_data, WeatherData):
+                                if len(weather.weather_data.forecasts) == 0:
+                                    response_content = f"Sorry, I couldn't find any information - Check the city name and try again."
+                                    st.error(response_content)
+                                else:
+                                    response_content = weather.weather_data
 
-                                print_weather_data(weather.weather_data)
-                                st.divider()
-                                st.caption(f"Total cost for this conversation: ${cost_data.dollar_cost:.4f},"
-                                           f" Request Tokens: {cost_data.request_tokens},"
-                                           f" Response Tokens: {cost_data.response_tokens}")
-                                st.caption(f"Total time taken to fetch weather data: {round(end_time - start_time)} seconds")
-                                # Start of code to capture agent conversation history
-                                # Create a StringIO object to capture the output
-                                output_buffer = io.StringIO()
+                                    print_weather_data(weather.weather_data)
+                                    st.divider()
+                                    st.caption(f"Total cost for this conversation: ${cost_data.dollar_cost:.4f},"
+                                               f" Request Tokens: {cost_data.request_tokens},"
+                                               f" Response Tokens: {cost_data.response_tokens}")
+                                    st.caption(f"Total time taken to fetch weather data: {round(end_time - start_time)} seconds")
+                                    # Start of code to capture agent conversation history
+                                    # Create a StringIO object to capture the output
+                                    output_buffer = io.StringIO()
 
-                                # Backup the original stdout
-                                original_stdout = sys.stdout
+                                    # Backup the original stdout
+                                    original_stdout = sys.stdout
 
-                                # Redirect stdout to the StringIO buffer
-                                sys.stdout = output_buffer
+                                    # Redirect stdout to the StringIO buffer
+                                    sys.stdout = output_buffer
 
-                                debug(agent_result.all_messages())
+                                    debug(agent_result.all_messages())
 
-                                # Reset stdout to its original value
-                                sys.stdout = original_stdout
+                                    # Reset stdout to its original value
+                                    sys.stdout = original_stdout
 
-                                # Get the captured output as a string
-                                captured_output = output_buffer.getvalue()
+                                    # Get the captured output as a string
+                                    captured_output = output_buffer.getvalue()
 
-                                st.expander("Click to see agent conversation history", expanded=False).code(captured_output)
+                                    st.expander("Click to see agent conversation history", expanded=False).code(captured_output)
 
-                                # Don't forget to close the buffer when you're done
-                                output_buffer.close()
-                                # End of code to capture agent conversation history
-                else:
+                                    # Don't forget to close the buffer when you're done
+                                    output_buffer.close()
+                                    # End of code to capture agent conversation history
+                elif weather.non_weather_related_message:
                     # If the response is not WeatherData, display the response content
                     response_content = weather.non_weather_related_message
                     st.write(response_content)
+                else:
+                    response_content = "Sorry, I couldn't find any information - Check the city name and try again."
+                    st.error(response_content)
 
-            st.session_state.messages.append(ModelTextResponse(content=response_content))
+            # st.session_state.messages.append(ModelTextResponse(content=response_content))
     with sample_prompts_tab:
         st.title("Sample Prompts")
         st.write("This section displays some sample prompts to try out the chatbot.")
