@@ -19,7 +19,7 @@ from devtools import debug
 from httpx import AsyncClient
 from pydantic import BaseModel
 from pydantic import Field
-from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai import Agent, ModelRetry, RunContext, UserError
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -67,10 +67,12 @@ class WeatherData(BaseModel):
 class AgentResult(BaseModel):
     weather_data: Optional[WeatherData] = Field(None, description="Weather data")
     non_weather_related_message: Optional[str] = Field(None, description="Generated in event of non-weather related input")
+    quota_key : Optional[str] = Field(None, description="Quota key")
 
 class QuotaStatus(BaseModel):
     quota_reached: bool
     count_today: int = -1 # Default value of -1 indicates that the count is not available
+    quota_key: Optional[str] = None
 
 @dataclass
 class Deps:
@@ -95,37 +97,8 @@ input_checker_agent = Agent(
     deps_type=Deps,
     retries=2,
     result_type=AgentResult,
-    # result_tool_name='check_response_object'
 )
 
-
-async def check_response_object(reply: AgentResult) ->  AgentResult:
-    """Check if the response object is valid."""
-    logger.info(f"Checking response object")
-    print("Checking response object")
-    debug(reply)
-    if reply.data:
-        daily_forecasts = reply.data.forecasts
-        weather = reply.data.current_temperature
-
-        if daily_forecasts == [] and weather is None:
-            logger.error('Could not find the daily forecasts and weather data')
-            raise ModelRetry('Could not find the daily forecasts and weather data')
-
-        if len(daily_forecasts) == 0:
-            logger.error('Could not find the daily forecasts')
-            raise ModelRetry('Could not find the daily forecasts')
-        else:
-            date = daily_forecasts[0].date
-            # Get the current date and time
-            current_datetime = datetime.now()
-            # Extract the year
-            current_year = current_datetime.year
-            if str(current_year) not in str(date):
-                logger.error('Could not find the current year in the date')
-                raise ModelRetry('Could not find the current year in the date')
-
-        return AgentResult
 
 @input_checker_agent.tool
 def quota_checker(ctx: RunContext[Deps], thoughts: str, user_input: str) -> QuotaStatus | RuntimeError:
@@ -170,7 +143,7 @@ def quota_checker(ctx: RunContext[Deps], thoughts: str, user_input: str) -> Quot
         # Write the updated DataFrame back to the CSV file
         df.to_csv(csv_file, index=False)
         logger.info(f"Quota not reached. Count: {count_today}")
-        return QuotaStatus(quota_reached=False, count_today=count_today)
+        return QuotaStatus(quota_reached=False, count_today=count_today, quota_key='qxzy34fg')
     else:
         logger.info(f"Quota reached. Count: {count_today}")
         raise RuntimeError('Max quota reached for the day. Please try again tomorrow.')
@@ -189,6 +162,42 @@ async def check_weather(ctx: RunContext[Deps], thoughts: str, user_input: str ) 
     result = await ctx.deps.weather_agent.run(user_input, deps=deps)
 
     return result.data
+
+@input_checker_agent.result_validator
+async def check_response_object(reply: AgentResult) ->  AgentResult:
+    """Check if the response object is valid."""
+    logger.info(f"Checking response object")
+    print("Checking response object")
+    debug(reply)
+    if reply.weather_data:
+        daily_forecasts = reply.weather_data.forecasts
+        weather = reply.weather_data.current_temperature
+
+        if daily_forecasts == [] and weather is None:
+            logger.error('Could not find the daily forecasts and weather data')
+            raise ModelRetry('Could not find the daily forecasts and weather data')
+
+        if len(daily_forecasts) == 0:
+            logger.error('Could not find the daily forecasts')
+            raise ModelRetry('Could not find the daily forecasts')
+        else:
+            date = daily_forecasts[0].date
+            # Get the current date and time
+            current_datetime = datetime.now()
+            # Extract the year
+            current_year = current_datetime.year
+            if str(current_year) not in str(date):
+                logger.error('Could not find the current year in the date')
+                raise ModelRetry('Could not find the current year in the date')
+
+        if reply.quota_key == "qxzy34fg":
+            logger.info(f"Quota key: {reply.quota_key}")
+        else:
+            logger.error(f"Quota key not found")
+            raise ModelRetry('Quota key is not what was expected')
+
+
+    return reply
 
 weather_agent = Agent(
     'openai:gpt-4o-mini',
@@ -282,6 +291,11 @@ async def get_lat_lng(ctx: RunContext[Deps], thoughts: str , city_name: str , is
     logger.info(f"[Tool quota_checker] Thoughts: {thoughts}")
     logger.info(f"Getting lat and lng for {city_name} and Country {iso_3166_alpha_2_country_name}")
     try:
+        if not city_name:
+            raise ModelRetry('City name is required')
+        if not iso_3166_alpha_2_country_name:
+            raise ModelRetry('Country name is required')
+
         api_key = ctx.deps.geo_api_key
         logger.info(f"Getting lat and lng for {city_name} and Country {iso_3166_alpha_2_country_name}")
         url = f'https://api.mapbox.com/geocoding/v5/mapbox.places/{city_name}.json?country={iso_3166_alpha_2_country_name}&access_token={api_key}'
