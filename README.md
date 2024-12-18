@@ -30,11 +30,9 @@ message stating that the request is not related to weather information.
 ## GUI Interface
 
 Below image shows the GUI interface of the chatbot . How and what part of Agents contribute to Weather information
-and how data is retried from backend 
+and how data is retrieve from backend 
 
 ![Agents_intro](pydantic_ai/static/agents_gui_intro.png)
-
-
 
 ## Demo 
 
