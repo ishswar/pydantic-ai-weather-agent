@@ -2,9 +2,13 @@ import os
 import uuid
 
 import pandas as pd
+import requests
 
 
 def calculate_cost(input_tokens, output_tokens):
+    """Calculate the total cost based on the number of input and output tokens.
+    Assuming model is GPT-4o-mini with the following pricing:
+    """
     input_cost_per_million = 0.15  # dollars per million input tokens
     output_cost_per_million = 0.60  # dollars per million output tokens
 
@@ -15,6 +19,7 @@ def calculate_cost(input_tokens, output_tokens):
     return total_cost
 
 def update_cost_in_csv(conversation_id: uuid, request_tokens: int, response_tokens: int):
+    """Update the total cost in the CSV file for a given conversation ID."""
     csv_file = os.environ.get('FUNCTION_CALL_CSV')
     # Check if the CSV file exists
     if os.path.exists(csv_file):
@@ -44,6 +49,7 @@ def update_cost_in_csv(conversation_id: uuid, request_tokens: int, response_toke
         print(f"CSV file {csv_file} does not exist.")
 
 def calculate_total_cost_from_csv() -> float:
+    """Calculate the total cost from the CSV file."""
     # Retrieve the CSV file path from the environment variable
     csv_file = os.environ.get('FUNCTION_CALL_CSV')
 
@@ -68,6 +74,7 @@ def calculate_total_cost_from_csv() -> float:
         return 0.0
 
 def generate_daily_report() -> pd.DataFrame:
+    """Generate a daily report from the CSV file."""
     # Retrieve the CSV file path from the environment variable
     csv_file = os.environ.get('FUNCTION_CALL_CSV')
 
@@ -102,6 +109,7 @@ def generate_daily_report() -> pd.DataFrame:
         print("Required columns are missing in the CSV file. Returning empty report.")
         return pd.DataFrame(columns=["date", "number_of_calls", "total_cost"])
 
+# Sample prompts for weather queries
 sample_prompts = [
             "What's the current temperature in The Big Apple?",
             "How's the weather in The City of Angels today?",
@@ -134,3 +142,62 @@ sample_prompts = [
             "Is it sunny in The Marvelous City?",
             "What's the temperature in The City of a Hundred Spires?"
 ]
+
+# Function to get key information from OpenRouter API
+def get_key_info(openrouter_api_key: str) -> str:
+    """ Get key information from OpenRouter API """
+    OPENAI_API_BASE = os.environ.get("OPENAI_API_BASE")
+    if OPENAI_API_BASE:
+        # Check if we are using openrouter
+        if "openrouter" in OPENAI_API_BASE:
+            url = f"{OPENAI_API_BASE}/auth/key"
+            headers = {
+                "Authorization": f"Bearer {openrouter_api_key}"
+            }
+
+            # Perform the GET request
+            response = requests.get(url, headers=headers)
+
+            # Check if the request was successful
+            if response.status_code == 200:
+                data = response.json()
+
+                # Expected structure (type Key):
+                # {
+                #   "data": {
+                #       "label": string,
+                #       "usage": number,
+                #       "limit": number | null,
+                #       "is_free_tier": boolean,
+                #       "rate_limit": {
+                #           "requests": number,
+                #           "interval": string
+                #       }
+                #   }
+                # }
+
+                # Extract values:
+                key_data = data["data"]
+                label = key_data["label"]
+                usage = key_data["usage"]
+                limit_val = key_data["limit"]
+                is_free_tier = key_data["is_free_tier"]
+                rate_limit = key_data["rate_limit"]
+
+                # Format limit to a readable string
+                limit_str = str(limit_val) if limit_val is not None else "Unlimited"
+
+                # Build a nice textual summary
+                summary = f"""
+                OpenRouter Information:  
+                  - Usage: {usage:.3f} credits used  
+                  - Limit: {limit_str}  
+                  - Left: {(limit_val - usage):.3f} credits remaining  
+                """
+                return summary.strip()
+            else:
+                print(f"Error: Received status code {response.status_code} from the API")
+                return f"Error: Received status code {response.status_code} from the API"
+        else:
+            return "Non OpenRouter API usage"
+

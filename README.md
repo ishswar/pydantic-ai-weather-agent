@@ -63,12 +63,13 @@ class AgentResult(BaseModel):
 
 ### Weather Agent
 
-The weather agent is responsible for fetching weather information from an external API.
-It fetches the weather information from the wttr.in API and also gets the latitude and longitude of the location from mapbox.com.
+The Weather Agent is responsible for fetching weather information from external APIs. It retrieves weather data from the **wttr.in** API and uses **mapbox.com** to get the latitude and longitude of a specified location.
 
-Weather agent has access to two tools `getweather` and `get_lat_lng`
+The Weather Agent provides access to two tools: `getweather` and `get_lat_lng`.
 
-Input checker is expected to generate below pydantic model as response 
+#### Input Checker and Expected Response
+
+The input checker is expected to generate the following **Pydantic models** as a response, which will be populated by the Weather Agent:
 
 ```python
 class HourlyForecast(BaseModel):
@@ -82,8 +83,6 @@ class DailyForecast(BaseModel):
     average_temperature: float  # Average temperature for the day
     hourly_forecasts: List[HourlyForecast]  # List of hourly forecasts
 
-
-
 class WeatherData(BaseModel):
     city: str = Field(..., description="City for which the weather data is retrieved")
     current_temperature: float = Field(..., description="Current temperature in the chosen unit")
@@ -96,20 +95,37 @@ class WeatherData(BaseModel):
     unknown_city: Optional[bool] = Field(None, description="True if the city is unknown")
     reason: Optional[str] = Field(None, description="Reason for the unknown city")
     country_emoji: Optional[str] = Field(None, description="Emoji representing the country's flag")
-    summary_of_next_x_days: Optional[str] = Field(None, description="Summery of next x days weather")
+    summary_of_next_x_days: Optional[str] = Field(None, description="Summary of the weather for the next x days")
 ```
 
-Tool (method) `getweather` needs few input that LLM are supposed to populate using it's world knowledge 
-`temperature_unit_celsius_or_fahrenheit` , `country_name` and enve `city_name` it needs to populate if user had made 
-typo in city name or city is unknown
+#### Tool: `getweather`
 
-If you look at the code `getweather` tool populate almost all fields in WeatherData model but 
-it then expects LLM to summarize the weather for next x days in filed 'summary_of_next_x_days'
-at same time `country_emoji` is also supposed to be populated by LLM. 
+The `getweather` tool requires the following inputs, which the LLM is expected to populate using its knowledge:
+- `temperature_unit_celsius_or_fahrenheit`
+- `country_name`
+- `city_name` (LLM should infer or correct this if the user makes a typo or specifies an unknown city)
 
-If user ask for City that is non-existent then `unknown_city` is set to True and `reason` is set to reason why city is unknown
+#### How `getweather` Populates Data
+- The `getweather` tool populates almost all fields in the **WeatherData** model, including:
+  - Current temperature
+  - Temperature unit
+  - City, latitude, longitude
+  - Country, region
+  - Forecasts
+- The tool relies on the LLM to populate:
+  - `summary_of_next_x_days`: A summary of the weather for the next x days
+  - `country_emoji`: An emoji representing the country's flag
 
-![Weather](pydantic_ai/static/invalid_city.png)
+#### Handling Non-Existent Cities
+- If the user requests weather data for a non-existent city:
+  - The `unknown_city` field is set to `True`.
+  - The `reason` field is populated with an explanation of why the city is unknown.
+  
+    ![Weather](pydantic_ai/static/invalid_city.png)
+  
+By combining API data and LLM capabilities, the Weather Agent ensures comprehensive and user-friendly weather information.
+
+
 
 
 

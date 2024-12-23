@@ -1,36 +1,48 @@
+import asyncio
 import copy
 import io
+import logging
+import os
 import random
 import sys
 import time
+import uuid
 
-import dotenv
-import pydantic_ai
-from devtools import debug
 import pandas as pd
+import plotly.graph_objects as go
+import pydantic_ai
+import streamlit as st
+from devtools import debug
 from dotenv import load_dotenv
 from httpx import AsyncClient
-from datetime import datetime
-import streamlit as st
-import asyncio
-
-import os
-import uuid
 from pydantic import BaseModel
-from pydantic_ai.messages import ModelResponse, UserPromptPart
+from pydantic_ai import UsageLimitExceeded, UnexpectedModelBehavior
 from pydantic_ai.result import ResultData
+
+load_dotenv()
+st.set_page_config(page_title="Pydantic AI Weather Chatbot", page_icon="🌦️")
+
+# Stop app if API keys are missing
+if not os.getenv('OPENAI_API_KEY'):
+    st.error("Please set the OPENAI_API_KEY environment variable.")
+    st.stop()
+
+# Check to see if the WEATHER_MAP_BOX_API_KEY is set - if not show warning message
+if not os.getenv('WEATHER_MAP_BOX_API_KEY'):
+    st.warning("Environment variable WEATHER_MAP_BOX_API_KEY is not set. Maps might not work properly.")
+    st.caption("Get Free token from https://console.mapbox.com/")
 
 # from weather_agent import AgentResult
 from utils.all_utils import calculate_cost, update_cost_in_csv, calculate_total_cost_from_csv, generate_daily_report, \
-    sample_prompts
-from weather_agent import WeatherData, input_checker_agent
+    sample_prompts, get_key_info
+from weather_agent import WeatherData, input_checker_agent, summarize_weather_agent
 # from web_search_agent import web_search_agent, Deps
-from weather_agent import weather_agent, Deps , AgentResult
-import logging
-import plotly.graph_objects as go
+from weather_agent import weather_agent, Deps
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+
 
 class ConversationCostData(BaseModel):
     request_tokens: int
@@ -38,12 +50,7 @@ class ConversationCostData(BaseModel):
     dollar_cost: float
 
 
-load_dotenv()
-
-
-st.set_page_config(page_title="Pydantic AI Weather Chatbot", page_icon="🌦️")
-
-chat_tab, sample_prompts_tab, cost_tab = st.tabs(["Chat", "Sample prompts","Cost Analysis"])
+chat_tab, sample_prompts_tab, cost_tab, info = st.tabs(["Chat", "Sample prompts","Cost Analysis", "App Info"])
 
 
 # @st.cache_resource
@@ -54,7 +61,8 @@ async def prompt_ai(messages) -> tuple[ResultData, uuid.UUID]:
         deps = Deps(
             client=client, geo_api_key=geo_api_key,
             weather_agent=weather_agent,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            summarize_weather_agent=summarize_weather_agent
         )
 
         # for message in messages:
@@ -86,7 +94,8 @@ def print_weather_data(weather):
         f"<span style='color: orange; font-size: 24px;'>{weather.current_temperature}° {weather.temp_unit}</span>",
         unsafe_allow_html=True
     )
-    st.write(f"{weather.summary_of_next_x_days}")
+    if weather.summary_of_next_x_days:
+        st.write(f"{weather.summary_of_next_x_days}")
     # debug(weather)
     latitude = weather.latitude
     longitude = weather.longitude
@@ -132,86 +141,89 @@ def print_weather_data(weather):
         )
         st.plotly_chart(fig, key=f"map-{uuid_}")
 
-    st.subheader(f"Weather Forecast for the next {len(weather.forecasts)} days:", divider=True)
-    for daily in weather.forecasts:
+    if weather.forecasts_id:
+        forcast_from_state = st.session_state[weather.forecasts_id + "_data"]
+        if forcast_from_state:
+            st.subheader(f"Weather Forecast for the next {len(forcast_from_state)} days:", divider=True)
+            for daily in forcast_from_state:
 
-        st.subheader(f"{daily.date}")
-        # Create DataFrame from hourly forecasts
-        df = pd.DataFrame([
-            {
-                'Hour': hourly.time,
-                'Temperature': hourly.temperature,
-                'Description': hourly.emoji + "  " + hourly.description,
-                'emoji': hourly.emoji
-            }
-            for hourly in daily.hourly_forecasts
-        ])
-        most_frequent_emoji = ''
-        most_frequent_data = None
-        if len(df) > 0:
-            # Count the occurrences of each description
-            description_counts = df['Description'].value_counts()
+                st.subheader(f"{daily.date}")
+                # Create DataFrame from hourly forecasts
+                df = pd.DataFrame([
+                    {
+                        'Hour': hourly.time,
+                        'Temperature': hourly.temperature,
+                        'Description': hourly.emoji + "  " + hourly.description,
+                        'emoji': hourly.emoji
+                    }
+                    for hourly in daily.hourly_forecasts
+                ])
+                most_frequent_emoji = ''
+                most_frequent_data = None
+                if len(df) > 0:
+                    # Count the occurrences of each description
+                    description_counts = df['Description'].value_counts()
 
-            # Get the most frequent description
-            most_frequent_description = description_counts.idxmax()
+                    # Get the most frequent description
+                    most_frequent_description = description_counts.idxmax()
 
-            # Filter the DataFrame to include only rows with the most frequent description
-            most_frequent_data = df[df['Description'] == most_frequent_description]
+                    # Filter the DataFrame to include only rows with the most frequent description
+                    most_frequent_data = df[df['Description'] == most_frequent_description]
 
-            # Get the corresponding emoji
-            most_frequent_emoji = most_frequent_data['emoji'].iloc[0]
+                    # Get the corresponding emoji
+                    most_frequent_emoji = most_frequent_data['emoji'].iloc[0]
 
-        st.metric(label="Average Temperature",
-                  value=f"{daily.average_temperature} °{weather.temp_unit} {most_frequent_emoji}" ,
-                  help=f"{most_frequent_data['Description'].iloc[0] if most_frequent_data is not None else 'Weather Description'}")
+                st.metric(label="Average Temperature",
+                          value=f"{daily.average_temperature} °{weather.temp_unit} {most_frequent_emoji}" ,
+                          help=f"{most_frequent_data['Description'].iloc[0] if most_frequent_data is not None else 'Weather Description'}")
 
 
-        if len(df) > 0:
-            st.write("Hourly Temperature Data:")
+                if len(df) > 0:
+                    st.write("Hourly Temperature Data:")
 
-            tale_area, chart_area = st.columns([6, 4])
+                    tale_area, chart_area = st.columns([6, 4])
 
-            # Display the DataFrame with hourly temperature data
-            with tale_area:
-                # Add a blank space to the DataFrame so chart and table are aligned
-                st.html("&nbsp")
-                st.dataframe(df, hide_index=True,
-                             column_config={
-                                 'emoji': None, # Hide the emoji column
-                             })
-            with chart_area:
+                    # Display the DataFrame with hourly temperature data
+                    with tale_area:
+                        # Add a blank space to the DataFrame so chart and table are aligned
+                        st.html("&nbsp")
+                        st.dataframe(df, hide_index=True,
+                                     column_config={
+                                         'emoji': None, # Hide the emoji column
+                                     })
+                    with chart_area:
 
-                fig = go.Figure()
+                        fig = go.Figure()
 
-                # Add the line chart with emojis
-                fig.add_trace(go.Scatter(
-                    x=df['Hour'],  # Use the x_values column from the DataFrame
-                    y=df['Temperature'],  # Use the y_values column from the DataFrame
-                    mode='lines+markers+text',
-                    name='Line with emojis',
-                    text=df['emoji'],  # Adding emojis from the DataFrame
-                    textposition='top center',  # Position of the text
-                    marker=dict(size=5, color='blue'),  # Custom marker properties
-                    hovertext= df['Hour'] + '<br> ' + df['Description'],  # Hover text to display word descriptions from DataFrame
-                    hoverinfo='text',  # Only show the hover text on hover
-                    textfont=dict(size=25),  # Adjust the font size of the text (emojis)
-                    line_shape='spline',  # Use a spline line shape
-                ))
+                        # Add the line chart with emojis
+                        fig.add_trace(go.Scatter(
+                            x=df['Hour'],  # Use the x_values column from the DataFrame
+                            y=df['Temperature'],  # Use the y_values column from the DataFrame
+                            mode='lines+markers+text',
+                            name='Line with emojis',
+                            text=df['emoji'],  # Adding emojis from the DataFrame
+                            textposition='top center',  # Position of the text
+                            marker=dict(size=5, color='blue'),  # Custom marker properties
+                            hovertext= df['Hour'] + '<br> ' + df['Description'],  # Hover text to display word descriptions from DataFrame
+                            hoverinfo='text',  # Only show the hover text on hover
+                            textfont=dict(size=25),  # Adjust the font size of the text (emojis)
+                            line_shape='spline',  # Use a spline line shape
+                        ))
 
-                # Force the x-axis to maintain the order in the dataframe
-                fig.update_xaxes(type='category', categoryorder='array', categoryarray=df['Hour'])
-                fig.update_layout(
-                    margin=dict(t=50),  # Remove padding around the plot area
-                    xaxis=dict(
-                        title="Hour of the Day",  # X-axis label
-                        tickangle=45  # Rotate x-axis labels to 45 degrees
-                    ),
-                    yaxis=dict(
-                        title=f"Temperature (°{weather.temp_unit})",  # Y-axis label
-                    ),
-                )
-                uuid_ = uuid.uuid4() # Each plotly chart needs a unique key
-                st.plotly_chart(fig, use_container_width=True, key=f"hourly-temperature-{uuid_}")
+                        # Force the x-axis to maintain the order in the dataframe
+                        fig.update_xaxes(type='category', categoryorder='array', categoryarray=df['Hour'])
+                        fig.update_layout(
+                            margin=dict(t=50),  # Remove padding around the plot area
+                            xaxis=dict(
+                                title="Hour of the Day",  # X-axis label
+                                tickangle=45  # Rotate x-axis labels to 45 degrees
+                            ),
+                            yaxis=dict(
+                                title=f"Temperature (°{weather.temp_unit})",  # Y-axis label
+                            ),
+                        )
+                        uuid_ = uuid.uuid4() # Each plotly chart needs a unique key
+                        st.plotly_chart(fig, use_container_width=True, key=f"hourly-temperature-{uuid_}")
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -299,7 +311,7 @@ async def main():
             # Add user message to chat history
             # st.session_state.messages.append(UserPromptPart(content=prompt))
             st.session_state.messages.append({"role": "user", "content": prompt})
-
+            agent_result = None
             # Display assistant response in chat message container
             response_content = ""
             with st.chat_message("assistant", avatar="🤖"):
@@ -312,83 +324,95 @@ async def main():
                         weather = agent_result.data # Get the weather data from the agent result
                         end_time = time.time()
                         logger.info(f"Time taken to fetch weather data: {(end_time - start_time)}")
-                        # st.session_state.messages = agent_result.all_messages()
                         st.session_state.messages.append({"role": "model-text-response", "content": weather})
-                except Exception as e:
-                    st.error(f"An error occurred: {str(e)}")
-                    response_content = f"An error occurred while calling agent : {str(e)}"
-                    print(f"An error occurred while calling agent : {str(e)}")
-                    logger.error(f"An error occurred while calling agent : {str(e)}", exc_info=True)
-                    # st.session_state.messages.append(ModelResponse(content=response_content))
-                    st.session_state.messages.append({"role": "model-text-response", "content": response_content})
-                    return
-
-                # Start cost calculation work
-                cost_object = agent_result.cost()  # Call the function to get the object
-                total_cost = calculate_cost(cost_object.request_tokens, cost_object.response_tokens)
-
-                update_cost_in_csv(conversation_id, cost_object.request_tokens, cost_object.response_tokens)
-                cost_data = ConversationCostData(
-                    request_tokens=cost_object.request_tokens,
-                    response_tokens=cost_object.response_tokens,
-                    dollar_cost=total_cost
-                )
-                # End cost calculation work
-
-                if weather.weather_data:
-                    if isinstance(weather.weather_data, WeatherData):
-                        if weather.weather_data.unknown_city:
-                            response_content = f"Sorry, I couldn't find any information [{weather.reason}]"
-                            st.error(response_content)
-                        else:
-                            if isinstance(weather.weather_data, WeatherData):
-                                if len(weather.weather_data.forecasts) == 0:
-                                    response_content = f"Sorry, I couldn't find any information - Check the city name and try again."
-                                    st.error(response_content)
-                                else:
-                                    response_content = weather.weather_data
-
-                                    print_weather_data(weather.weather_data)
-                                    st.divider()
-                                    st.caption(f"Total cost for this conversation: ${cost_data.dollar_cost:.4f},"
-                                               f" Request Tokens: {cost_data.request_tokens},"
-                                               f" Response Tokens: {cost_data.response_tokens}")
-                                    st.caption(f"Total time taken to fetch weather data: {round(end_time - start_time)} seconds")
-                                    # Start of code to capture agent conversation history
-                                    # Create a StringIO object to capture the output
-                                    output_buffer = io.StringIO()
-
-                                    # Backup the original stdout
-                                    original_stdout = sys.stdout
-
-                                    # Redirect stdout to the StringIO buffer
-                                    sys.stdout = output_buffer
-
-                                    debug(agent_result.all_messages())
-
-                                    # Reset stdout to its original value
-                                    sys.stdout = original_stdout
-
-                                    # Get the captured output as a string
-                                    captured_output = output_buffer.getvalue()
-
-                                    st.expander("Click to see agent conversation history", expanded=False).code(captured_output)
-
-                                    # Don't forget to close the buffer when you're done
-                                    output_buffer.close()
-                                    # End of code to capture agent conversation history
-                elif weather.non_weather_related_message:
-                    # If the response is not WeatherData, display the response content
-                    response_content = weather.non_weather_related_message
-                    st.write(response_content)
-                else:
-                    response_content = "Sorry, I couldn't find any information - Check the city name and try again."
+                except UnexpectedModelBehavior as e:
+                    response_content = f"Unexpected model behavior (Agents could not complete task) : {str(e)}"
                     st.error(response_content)
+                    print(response_content)
+                    logger.error(response_content, exc_info=True)
+                    st.session_state.messages.append({"role": "model-text-response", "content": response_content})
+
+                except UsageLimitExceeded as e:
+                    response_content = f"Usage limit exceeded (Agents misbehaved) : {str(e)}"
+                    st.error(response_content)
+                    print(response_content)
+                    logger.error(response_content, exc_info=True)
+                    st.session_state.messages.append({"role": "model-text-response", "content": response_content})
+                except Exception as e:
+                    response_content = f"An error occurred while calling agent : {str(e)}"
+                    st.error(response_content)
+                    print(response_content)
+                    logger.error(  response_content, exc_info=True)
+                    st.session_state.messages.append({"role": "model-text-response", "content": response_content})
+
+                if agent_result:
+                    # Start cost calculation work
+                    cost_object = agent_result.usage()  # Call the function to get the object
+                    total_cost = calculate_cost(cost_object.request_tokens, cost_object.response_tokens)
+
+                    update_cost_in_csv(conversation_id, cost_object.request_tokens, cost_object.response_tokens)
+                    cost_data = ConversationCostData(
+                        request_tokens=cost_object.request_tokens,
+                        response_tokens=cost_object.response_tokens,
+                        dollar_cost=total_cost
+                    )
+                    # End cost calculation work
+
+                    if weather.weather_data:
+                        if isinstance(weather.weather_data, WeatherData):
+                            if weather.weather_data.unknown_city:
+                                response_content = f"Sorry, I couldn't find any information [{weather.reason}]"
+                                st.error(response_content)
+                            else:
+                                if isinstance(weather.weather_data, WeatherData):
+                                    if weather.weather_data.forecasts_id:
+                                        forcast_from_state = st.session_state[weather.weather_data.forecasts_id + "_data"]
+                                        if forcast_from_state:
+                                            if len(forcast_from_state) == 0:
+                                                response_content = f"Sorry, I couldn't find any information - Check the city name and try again."
+                                                st.error(response_content)
+                                            else:
+                                                print_weather_data(weather.weather_data)
+                                                st.divider()
+                                                st.caption(f"Total cost for this conversation: ${cost_data.dollar_cost:.4f},"
+                                                           f" Request Tokens: {cost_data.request_tokens},"
+                                                           f" Response Tokens: {cost_data.response_tokens}")
+                                                st.caption(f"Total time taken to fetch weather data: {round(end_time - start_time)} seconds")
+                                                # Start of code to capture agent conversation history
+                                                # Create a StringIO object to capture the output
+                                                output_buffer = io.StringIO()
+
+                                                # Backup the original stdout
+                                                original_stdout = sys.stdout
+
+                                                # Redirect stdout to the StringIO buffer
+                                                sys.stdout = output_buffer
+
+                                                debug(agent_result.all_messages())
+
+                                                # Reset stdout to its original value
+                                                sys.stdout = original_stdout
+
+                                                # Get the captured output as a string
+                                                captured_output = output_buffer.getvalue()
+
+                                                st.expander("Click to see agent conversation history", expanded=False).code(captured_output)
+
+                                                # Don't forget to close the buffer when you're done
+                                                output_buffer.close()
+                                                # End of code to capture agent conversation history
+                    elif weather.non_weather_related_message:
+                        # If the response is not WeatherData, display the response content
+                        response_content = weather.non_weather_related_message
+                        st.write(response_content)
+                    else:
+                        response_content = "Sorry, I couldn't find any information - Check the city name and try again."
+                        st.error(response_content)
 
             # st.session_state.messages.append(ModelTextResponse(content=response_content))
     with sample_prompts_tab:
         st.title("Sample Prompts")
-        st.write("This section displays some sample prompts to try out the chatbot.")
+        st.write("This section displays some sample prompts to try out with the weather chatbot.")
         for prompt in sample_prompts:
             st.write(f"- {prompt}")
     with cost_tab:
@@ -398,9 +422,31 @@ async def main():
         st.metric(label="Total Cost", value=f"${total_cost}")
         daily_cost_df = generate_daily_report()
         st.write("Daily Cost Report:")
-        st.dataframe(daily_cost_df, hide_index=True)
+        if not daily_cost_df.empty:
+            st.dataframe(daily_cost_df, hide_index=True)
+        else:
+            # In orange text write that there is no data available
+            st.html("<p style='color: orange;'>No data available.</p>")
         daily_quota = os.getenv('MAX_QUOTA')
         st.caption(f"Daily Quota: {daily_quota}")
+        st.subheader("OpenRouter API Cost", divider=True)
+        # OpneRoute API Cost
+        OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+        openrouter_cost = get_key_info(OPENAI_API_KEY)
+        st.markdown(openrouter_cost)
+    with info:
+        # Path to your README.md file
+        readme_path = "../README.md"
+
+        # Read the content of the README.md file
+        with open(readme_path, "r", encoding="utf-8") as file:
+            readme_content = file.read()
+
+        # In readme_content replace "pydantic_ai/static" with "app/static"
+        readme_content = readme_content.replace("pydantic_ai/static", "app/static")
+
+        # Render the Markdown content in Streamlit
+        st.markdown(readme_content, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

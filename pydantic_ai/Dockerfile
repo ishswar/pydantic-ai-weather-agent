@@ -13,8 +13,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code into the container
 COPY . /app/
 
+# Cpoy README.md into the container
+COPY ../README.md /app/
+
 # Expose the port that Streamlit will run on
 EXPOSE 8581
 
 # Command to run the application
-CMD ["streamlit", "run", "weather_app.py", "--server.port=8581", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "weather_app.py", "--server.port=8581", "--server.enableStaticServing=true", "--server.address=0.0.0.0"]
