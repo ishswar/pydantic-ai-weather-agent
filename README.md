@@ -125,9 +125,7 @@ The `getweather` tool requires the following inputs, which the LLM is expected t
   
 By combining API data and LLM capabilities, the Weather Agent ensures comprehensive and user-friendly weather information.
 
-
-
-
+### Sample output from the console
 
 ```shell
 22:49:02.440 input_checker_agent run prompt=oKAY , Do I need rain jacket in London ? 
@@ -173,3 +171,28 @@ INFO:__main__:Time taken to fetch weather data: 29.16667103767395
 22:49:31.551   handle model response
 Total cost for e05f344e-e5cf-46d1-a95c-17ce7f13560b: $0.00092235
 ```
+
+### Installation and Running Steps for the Streamlit App
+
+1. **Install Miniconda**  
+   - Download and install Miniconda from the [official Miniconda website](https://docs.conda.io/en/latest/miniconda.html).
+
+2. **Create and Activate a Conda Environment**  
+   ```bash
+   conda create -n weather_agent_py_ai python=3.10
+   conda activate weather_agent_py_ai
+   ```
+
+3. **Install Dependencies**  
+   - Use the `requirements.txt` file to install necessary libraries:
+     ```bash
+     pip install -r requirements.txt
+     ```
+
+4. **Run the Streamlit App**  
+   - Start the Streamlit app with the following command:
+     ```bash
+     streamlit run weather_app.py --server.port 8581 --server.headless=true --server.enableStaticServing=true
+     ```
+
+This process sets up the environment, installs dependencies, and runs the app on port `8581`. You can access it via your browser at `http://localhost:8581`.

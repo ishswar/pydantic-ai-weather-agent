@@ -248,7 +248,7 @@ async def summarize_weather(ctx: RunContext[SummarizeData]
         if conversation_id + "_data" in st.session_state:
             daily_forecasts = st.session_state[conversation_id + "_data"]
             forecast_json = json.dumps([item.model_dump_json() for item in daily_forecasts])
-            print(f"Forecast data: {forecast_json}")
+            # print(f"Forecast data: {forecast_json}")
             return f"""Summarizing the weather forecast for {ctx.deps.city_name} for the next 3 days.
                 Forecast data: {forecast_json}"""
         else:
